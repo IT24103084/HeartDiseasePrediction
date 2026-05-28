@@ -1,228 +1,335 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from datetime import datetime
+from io import BytesIO
 
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+
+# =========================
 # Load model, scaler, and selected features
+# =========================
 model = joblib.load("heart_disease_model.pkl")
 scaler = joblib.load("scaler.pkl")
 selected_features = joblib.load("selected_features.pkl")
 
+
+# =========================
 # Page configuration
+# =========================
 st.set_page_config(
     page_title="Heart Disease Prediction",
     page_icon="❤️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom CSS for modern UI
-st.markdown("""
-<style>
-    /* Main background gradient */
-    .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    
-    /* Card styling */
-    .custom-card {
-        background: white;
-        border-radius: 15px;
-        padding: 25px;
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-        margin: 15px 0;
-    }
-    
-    /* Header section */
-    .hero-section {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #00bcd4 100%);
-        color: white;
-        padding: 40px 30px;
-        border-radius: 15px;
-        text-align: center;
-        margin: 20px 0;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-    }
-    
-    .hero-section h1 {
-        font-size: 2.5em;
-        margin-bottom: 10px;
-        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
-    }
-    
-    .hero-section p {
-        font-size: 1.1em;
-        opacity: 0.95;
-    }
-    
-    /* Input section card */
-    .input-card {
-        background: white;
-        border-radius: 15px;
-        padding: 30px;
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-    }
-    
-    /* Result cards */
-    .result-card-success {
-        background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
-        border-radius: 15px;
-        padding: 30px;
-        color: #1a5f34;
-        box-shadow: 0 8px 16px rgba(132, 250, 176, 0.3);
-    }
-    
-    .result-card-danger {
-        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        border-radius: 15px;
-        padding: 30px;
-        color: #8b0000;
-        box-shadow: 0 8px 16px rgba(250, 112, 154, 0.3);
-    }
-    
-    /* Button styling */
-    .predict-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 15px 40px;
-        border-radius: 10px;
-        font-weight: bold;
-        font-size: 1.1em;
-        border: none;
-        cursor: pointer;
-        transition: transform 0.2s;
-    }
-    
-    .predict-button:hover {
-        transform: scale(1.02);
-    }
-    
-    /* Sidebar styling */
-    .sidebar-card {
-        background: rgba(255, 255, 255, 0.95);
-        border-radius: 10px;
-        padding: 15px;
-        margin: 10px 0;
-    }
-    
-    /* Table styling */
-    table {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    
-    /* Footer styling */
-    .footer {
-        text-align: center;
-        padding: 20px;
-        color: rgba(255, 255, 255, 0.8);
-        font-size: 0.9em;
-        margin-top: 40px;
-        border-top: 2px solid rgba(255, 255, 255, 0.2);
-    }
-    
-    /* Risk level indicator */
-    .risk-low {
-        color: #2ecc71;
-        font-weight: bold;
-        font-size: 1.2em;
-    }
-    
-    .risk-high {
-        color: #e74c3c;
-        font-weight: bold;
-        font-size: 1.2em;
-    }
-    
-    /* Metric styling */
-    .metric-box {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-        margin: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
+# =========================
+# Session state for prediction history
+# =========================
+if "prediction_history" not in st.session_state:
+    st.session_state.prediction_history = []
+
+
+# =========================
+# Helper functions
+# =========================
+def get_risk_level(higher_probability):
+    if higher_probability < 40:
+        return "Low"
+    elif higher_probability < 70:
+        return "Medium"
+    else:
+        return "High"
+
+
+def get_health_tips(risk_level):
+    if risk_level == "Low":
+        return """
+        ✅ Low Risk Health Tips
+
+        - Maintain a balanced diet.
+        - Exercise regularly.
+        - Drink enough water.
+        - Avoid smoking and excessive alcohol.
+        - Continue regular health checkups.
+        """
+    elif risk_level == "Medium":
+        return """
+        ⚠️ Medium Risk Health Tips
+
+        - Monitor blood pressure and cholesterol levels.
+        - Reduce oily, salty, and high-sugar foods.
+        - Do regular walking, jogging, or light exercise.
+        - Manage stress and get enough sleep.
+        - Consider consulting a doctor if symptoms continue.
+        """
+    else:
+        return """
+        🚨 High Risk Health Tips
+
+        - Please consult a qualified doctor as soon as possible.
+        - Do not ignore chest pain, breathing difficulty, or unusual tiredness.
+        - Avoid heavy physical activity until medical advice is taken.
+        - Monitor blood pressure, cholesterol, and sugar levels.
+        - Follow professional medical guidance.
+        """
+
+
+def clean_text_for_pdf(text):
+    return (
+        text.replace("✅", "")
+        .replace("⚠️", "")
+        .replace("🚨", "")
+        .replace("**", "")
+        .replace("\n", "<br/>")
+    )
+
+
+def generate_pdf_report(report_data, health_tips):
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40
+    )
+
+    styles = getSampleStyleSheet()
+    elements = []
+
+    row = report_data.iloc[0]
+
+    # =========================
+    # Title
+    # =========================
+    title = Paragraph("Heart Disease Prediction Report", styles["Title"])
+    subtitle = Paragraph("Machine Learning Based Prediction Summary", styles["Normal"])
+
+    elements.append(title)
+    elements.append(Spacer(1, 8))
+    elements.append(subtitle)
+    elements.append(Spacer(1, 20))
+
+    # =========================
+    # Patient input details
+    # =========================
+    elements.append(Paragraph("Patient Input Details", styles["Heading2"]))
+
+    patient_data = [
+        ["Feature", "Value"],
+        ["Date & Time", str(row["Date & Time"])],
+        ["Age", str(row["Age"])],
+        ["Chest Pain Type", str(row["Chest Pain Type"])],
+        ["Maximum Heart Rate", str(row["Maximum Heart Rate"])],
+        ["Exercise Induced Angina", str(row["Exercise Induced Angina"])],
+        ["Oldpeak", str(row["Oldpeak"])],
+        ["Major Vessels", str(row["Major Vessels"])],
+        ["Thalassemia", str(row["Thalassemia"])]
+    ]
+
+    patient_table = Table(patient_data, colWidths=[220, 250])
+    patient_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0ea5e9")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+        ("PADDING", (0, 0), (-1, -1), 8),
+    ]))
+
+    elements.append(patient_table)
+    elements.append(Spacer(1, 20))
+
+    # =========================
+    # Prediction result
+    # =========================
+    elements.append(Paragraph("Prediction Result", styles["Heading2"]))
+
+    prediction_data = [
+        ["Result", "Value"],
+        ["Prediction", str(row["Prediction Result"])],
+        ["Lower Possibility", f'{row["Lower Possibility (%)"]}%'],
+        ["Higher Possibility", f'{row["Higher Possibility (%)"]}%'],
+        ["Risk Level", str(row["Risk Level"])]
+    ]
+
+    prediction_table = Table(prediction_data, colWidths=[220, 250])
+    prediction_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#6366f1")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#eef2ff")),
+        ("PADDING", (0, 0), (-1, -1), 8),
+    ]))
+
+    elements.append(prediction_table)
+    elements.append(Spacer(1, 20))
+
+    # =========================
+    # Health guidance
+    # =========================
+    elements.append(Paragraph("Health Guidance", styles["Heading2"]))
+
+    cleaned_tips = clean_text_for_pdf(health_tips)
+    elements.append(Paragraph(cleaned_tips, styles["Normal"]))
+    elements.append(Spacer(1, 20))
+
+    # =========================
+    # Disclaimer
+    # =========================
+    disclaimer = """
+    <b>Disclaimer:</b> This report is generated for educational purposes only.
+    It should not be used as a real medical diagnosis.
+    Please consult a qualified medical professional for proper medical advice.
+    """
+
+    elements.append(Paragraph(disclaimer, styles["Normal"]))
+    elements.append(Spacer(1, 20))
+
+    footer = Paragraph(
+        "Developed using Python, Scikit-learn, Streamlit, and ReportLab",
+        styles["Italic"]
+    )
+    elements.append(footer)
+
+    doc.build(elements)
+
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    return pdf
+
+
+# =========================
 # Sidebar
-with st.sidebar:
-    st.markdown("### 📋 About This App")
-    st.markdown("""
-    This is a **Heart Disease Prediction System** that uses machine learning 
-    to estimate the possibility of heart disease based on important health indicators.
-    """)
-    
-    st.markdown("---")
-    st.markdown("### 🔬 Features Used")
-    st.markdown("""
-    1. **Age** - Patient's age in years
-    2. **Chest Pain Type** - Classification of chest pain
-    3. **Maximum Heart Rate** - Peak heart rate during exercise
-    4. **Exercise Induced Angina** - Angina triggered by exercise
-    5. **Oldpeak (ST Depression)** - Exercise-induced ST segment depression
-    6. **Major Vessels** - Number of colored vessels
-    7. **Thalassemia** - Blood disorder classification
-    """)
-    
-    st.markdown("---")
-    st.markdown("### 🛠️ Technologies")
-    st.markdown("""
-    - **Python** - Programming language
-    - **Scikit-learn** - ML model training
-    - **Streamlit** - Web framework
-    - **Pandas** - Data handling
-    - **Joblib** - Model persistence
-    """)
-    
-    st.markdown("---")
-    st.markdown("### ⚠️ Disclaimer")
-    st.warning("""
-    **Educational Purpose Only**
-    
-    This application is designed for educational purposes and should NOT be used as 
-    a replacement for professional medical diagnosis. Always consult a qualified 
-    healthcare professional for accurate medical advice.
+# =========================
+st.sidebar.title("❤️ Heart Disease Prediction")
+
+st.sidebar.write("""
+This machine learning app predicts the possibility of heart disease using selected important health features.
+""")
+
+st.sidebar.info("""
+Selected Features:
+- Age
+- Chest Pain Type
+- Maximum Heart Rate
+- Exercise Induced Angina
+- Oldpeak
+- Major Vessels
+- Thalassemia
+""")
+
+st.sidebar.markdown("### 🛠️ Technologies Used")
+st.sidebar.write("""
+- Python
+- Pandas
+- Scikit-learn
+- Streamlit
+- Joblib
+- ReportLab
+""")
+
+st.sidebar.warning("""
+This is an educational project only.  
+It is not a medical diagnosis tool.
+""")
+
+
+# =========================
+# Main title
+# =========================
+st.title("❤️ Heart Disease Prediction System")
+st.write("Enter patient health details below and click **Predict** to get the result.")
+
+st.divider()
+
+
+# =========================
+# Information box
+# =========================
+st.info("""
+This app uses a trained machine learning model to estimate whether a patient has a lower or higher possibility of heart disease.
+Please enter realistic values for better prediction.
+""")
+
+
+# =========================
+# Input Guide
+# =========================
+with st.expander("📘 Input Guide - What do these fields mean?"):
+    st.write("""
+    **Age:** Patient's age.
+
+    **Chest Pain Type:** Type of chest pain experienced by the patient.
+    - Typical Angina
+    - Atypical Angina
+    - Non-anginal Pain
+    - Asymptomatic
+
+    **Maximum Heart Rate Achieved:** Highest heart rate achieved during exercise.
+
+    **Exercise Induced Angina:** Whether exercise causes chest pain.
+
+    **Oldpeak / ST Depression:** ST depression caused by exercise compared to rest.
+
+    **Number of Major Vessels:** Number of major blood vessels colored by fluoroscopy.
+
+    **Thalassemia:** Blood disorder test result related to thalassemia.
     """)
 
-# Hero Section
-st.markdown("""
-<div class="hero-section">
-    <h1>❤️ Heart Disease Prediction System</h1>
-    <p>Powered by Machine Learning | Enter Your Health Details Below</p>
-</div>
-""", unsafe_allow_html=True)
 
-# Instructions
-st.markdown("""
-<div style="background: rgba(255, 255, 255, 0.95); border-radius: 15px; padding: 20px; margin: 20px 0;">
-    <h3>📖 How to Use</h3>
-    <ul style="font-size: 1em;">
-        <li>Enter your health metrics in the form below</li>
-        <li>Use realistic values based on medical check-ups</li>
-        <li>Click the <b>Predict</b> button to get an estimate</li>
-        <li>Review the risk assessment and consult a doctor for confirmation</li>
-    </ul>
-</div>
-""", unsafe_allow_html=True)
+# =========================
+# Model Information
+# =========================
+with st.expander("🤖 Model Information"):
+    st.write("""
+    **Project Type:** Machine Learning Classification
 
+    **Algorithm Used:** Random Forest Classifier
+
+    **Number of Selected Features:** 7
+
+    **Output:** Lower or Higher possibility of heart disease
+
+    **Selected Features Used by the Model:**
+    - Age
+    - Chest Pain Type
+    - Maximum Heart Rate Achieved
+    - Exercise Induced Angina
+    - Oldpeak / ST Depression
+    - Number of Major Vessels
+    - Thalassemia
+    """)
+
+
+# =========================
 # Input section
-st.markdown("### 📝 Patient Health Information")
+# =========================
+st.subheader("📝 Patient Information")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    age = st.slider(
-        "👤 Age (years)",
-        min_value=18,
+    age = st.number_input(
+        "Age",
+        min_value=1,
         max_value=120,
-        value=50,
-        step=1,
-        help="Select your age in years"
+        value=30,
+        help="Enter the age of the patient"
     )
 
     cp = st.selectbox(
-        "💔 Chest Pain Type",
+        "Chest Pain Type",
         [0, 1, 2, 3],
         format_func=lambda x: {
             0: "Typical Angina",
@@ -230,45 +337,42 @@ with col1:
             2: "Non-anginal Pain",
             3: "Asymptomatic"
         }[x],
-        help="Select the type of chest pain you experience"
+        help="Type of chest pain experienced by the patient"
     )
 
-    thalach = st.slider(
-        "💓 Maximum Heart Rate Achieved (bpm)",
+    thalach = st.number_input(
+        "Maximum Heart Rate Achieved",
         min_value=60,
-        max_value=220,
+        max_value=250,
         value=150,
-        step=1,
-        help="Your peak heart rate during exercise"
+        help="Maximum heart rate achieved during exercise"
     )
 
-    exang = st.radio(
-        "🏃 Exercise Induced Angina",
+    exang = st.selectbox(
+        "Exercise Induced Angina",
         [0, 1],
         format_func=lambda x: "No" if x == 0 else "Yes",
-        horizontal=True,
-        help="Do you experience chest pain during exercise?"
+        help="Chest pain caused by exercise"
     )
 
 with col2:
-    oldpeak = st.slider(
-        "📉 ST Depression (Oldpeak)",
+    oldpeak = st.number_input(
+        "Oldpeak / ST Depression",
         min_value=0.0,
         max_value=10.0,
         value=1.0,
         step=0.1,
-        help="ST segment depression induced by exercise"
+        help="ST depression induced by exercise relative to rest"
     )
 
-    ca = st.select_slider(
-        "🔴 Number of Major Vessels",
-        options=[0, 1, 2, 3, 4],
-        value=0,
+    ca = st.selectbox(
+        "Number of Major Vessels",
+        [0, 1, 2, 3, 4],
         help="Number of major vessels colored by fluoroscopy"
     )
 
     thal = st.selectbox(
-        "🩸 Thalassemia",
+        "Thalassemia",
         [0, 1, 2, 3],
         format_func=lambda x: {
             0: "Unknown",
@@ -276,22 +380,38 @@ with col2:
             2: "Fixed Defect",
             3: "Reversible Defect"
         }[x],
-        help="Blood disorder classification"
+        help="Thalassemia blood disorder result"
     )
 
+
+# =========================
+# Convert selected values to readable text
+# =========================
+cp_text = {
+    0: "Typical Angina",
+    1: "Atypical Angina",
+    2: "Non-anginal Pain",
+    3: "Asymptomatic"
+}[cp]
+
+exang_text = "No" if exang == 0 else "Yes"
+
+thal_text = {
+    0: "Unknown",
+    1: "Normal",
+    2: "Fixed Defect",
+    3: "Reversible Defect"
+}[thal]
+
+st.divider()
+
+
+# =========================
 # Prediction button
-st.markdown("---")
-col_button1, col_button2, col_button3 = st.columns([1, 2, 1])
+# =========================
+st.subheader("🔍 Prediction")
 
-with col_button2:
-    predict_clicked = st.button(
-        "🔍 Predict Heart Disease Possibility",
-        use_container_width=True,
-        type="primary"
-    )
-
-if predict_clicked:
-    # Create input dataframe with correct feature order
+if st.button("Predict Heart Disease Possibility", use_container_width=True):
     input_data = pd.DataFrame({
         "age": [age],
         "cp": [cp],
@@ -302,7 +422,6 @@ if predict_clicked:
         "thal": [thal]
     })
 
-    # Scale and predict
     input_scaled = scaler.transform(input_data)
     prediction = model.predict(input_scaled)
     probability = model.predict_proba(input_scaled)
@@ -310,114 +429,155 @@ if predict_clicked:
     lower_probability = probability[0][0] * 100
     higher_probability = probability[0][1] * 100
 
-    # Determine risk level
-    if higher_probability > 70:
-        risk_level = "🔴 Very High Risk"
-        risk_color = "danger"
-    elif higher_probability > 50:
-        risk_level = "🟠 High Risk"
-        risk_color = "danger"
-    elif higher_probability > 30:
-        risk_level = "🟡 Moderate Risk"
-        risk_color = "warning"
-    else:
-        risk_level = "🟢 Low Risk"
-        risk_color = "success"
+    prediction_result = (
+        "Higher Possibility of Heart Disease"
+        if prediction[0] == 1
+        else "Lower Possibility of Heart Disease"
+    )
 
-    st.markdown("---")
-    st.markdown("### 📊 Prediction Results")
+    risk_level = get_risk_level(higher_probability)
+    health_tips = get_health_tips(risk_level)
 
-    # Result cards
+    # =========================
+    # Prediction result
+    # =========================
+    st.subheader("📊 Prediction Result")
+
     result_col1, result_col2 = st.columns(2)
 
     with result_col1:
         if prediction[0] == 1:
-            st.markdown("""
-            <div class="result-card-danger">
-                <h3 style="margin-top: 0;">⚠️ Higher Possibility of Heart Disease</h3>
-                <p>The model indicates a <b>higher possibility</b> of heart disease based on the provided health metrics.</p>
-                <p><b>⚕️ Recommendation:</b> Please consult a qualified medical professional immediately for proper diagnosis and treatment.</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.error("⚠️ Higher Possibility of Heart Disease")
+            st.write("""
+            The model predicts that the patient may have a higher possibility of heart disease.
+            Please consult a qualified medical professional for proper diagnosis.
+            """)
         else:
-            st.markdown("""
-            <div class="result-card-success">
-                <h3 style="margin-top: 0;">✅ Lower Possibility of Heart Disease</h3>
-                <p>The model indicates a <b>lower possibility</b> of heart disease based on the provided health metrics.</p>
-                <p><b>💚 Recommendation:</b> Continue maintaining a healthy lifestyle with regular exercise and health checkups.</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.success("✅ Lower Possibility of Heart Disease")
+            st.write("""
+            The model predicts that the patient may have a lower possibility of heart disease.
+            However, regular health checkups are still important.
+            """)
 
     with result_col2:
-        col_metric1, col_metric2 = st.columns(2)
-        
-        with col_metric1:
-            st.metric(
-                "🟢 Lower Possibility",
-                f"{lower_probability:.1f}%",
-                help="Probability of not having heart disease"
-            )
-        
-        with col_metric2:
-            st.metric(
-                "🔴 Higher Possibility",
-                f"{higher_probability:.1f}%",
-                help="Probability of having heart disease"
-            )
+        st.metric("Lower Possibility", f"{lower_probability:.2f}%")
+        st.metric("Higher Possibility", f"{higher_probability:.2f}%")
 
-    # Risk Level Indicator
-    st.markdown(f"### Risk Level: {risk_level}")
-    st.progress(int(higher_probability) / 100)
+        st.write("### Risk Level")
+        st.progress(int(higher_probability))
 
-    # Input Summary Table
-    st.markdown("### 📋 Input Summary")
-    summary_data = pd.DataFrame({
-        "Feature": [
-            "👤 Age",
-            "💔 Chest Pain Type",
-            "💓 Maximum Heart Rate",
-            "🏃 Exercise Induced Angina",
-            "📉 ST Depression",
-            "🔴 Major Vessels",
-            "🩸 Thalassemia"
-        ],
-        "Value": [
-            f"{age} years",
-            {
-                0: "Typical Angina",
-                1: "Atypical Angina",
-                2: "Non-anginal Pain",
-                3: "Asymptomatic"
-            }[cp],
-            f"{thalach} bpm",
-            "No" if exang == 0 else "Yes",
-            f"{oldpeak}",
-            f"{ca}",
-            {
-                0: "Unknown",
-                1: "Normal",
-                2: "Fixed Defect",
-                3: "Reversible Defect"
-            }[thal]
-        ]
+        if risk_level == "Low":
+            st.success("Risk Level: Low")
+        elif risk_level == "Medium":
+            st.warning("Risk Level: Medium")
+        else:
+            st.error("Risk Level: High")
+
+    st.divider()
+
+    # =========================
+    # Health tips
+    # =========================
+    st.subheader("💡 Health Tips Based on Result")
+    st.info(health_tips)
+    st.warning("This advice is for educational purposes only. Please consult a doctor for real medical advice.")
+
+    st.divider()
+
+    # =========================
+    # Report data
+    # =========================
+    report_data = pd.DataFrame({
+        "Date & Time": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        "Age": [age],
+        "Chest Pain Type": [cp_text],
+        "Maximum Heart Rate": [thalach],
+        "Exercise Induced Angina": [exang_text],
+        "Oldpeak": [oldpeak],
+        "Major Vessels": [ca],
+        "Thalassemia": [thal_text],
+        "Prediction Result": [prediction_result],
+        "Lower Possibility (%)": [round(lower_probability, 2)],
+        "Higher Possibility (%)": [round(higher_probability, 2)],
+        "Risk Level": [risk_level]
     })
 
-    st.table(summary_data)
+    # =========================
+    # Input Summary
+    # =========================
+    st.write("### 📋 Input Summary")
+    st.dataframe(report_data, use_container_width=True, hide_index=True)
+
+    # =========================
+    # Download report as PDF
+    # =========================
+    pdf_report = generate_pdf_report(report_data, health_tips)
+
+    st.download_button(
+        label="📄 Download Prediction Report as PDF",
+        data=pdf_report,
+        file_name="heart_disease_prediction_report.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )
+
+    # =========================
+    # Download report data as CSV
+    # =========================
+    csv_report = report_data.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="📥 Download Report Data as CSV",
+        data=csv_report,
+        file_name="heart_disease_prediction_data.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    # =========================
+    # Save to prediction history
+    # =========================
+    st.session_state.prediction_history.append(report_data.iloc[0].to_dict())
 
 else:
-    st.markdown("""
-    <div style="background: rgba(255, 255, 255, 0.95); border-radius: 15px; padding: 20px; text-align: center; margin: 40px 0;">
-        <p style="font-size: 1.1em; color: #666;">
-            👉 <b>Enter your health details above and click the "Predict" button to get started!</b>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.write("Click the prediction button after entering patient details.")
 
+
+# =========================
+# Prediction History
+# =========================
+st.divider()
+st.subheader("🕘 Prediction History")
+
+if len(st.session_state.prediction_history) > 0:
+    history_df = pd.DataFrame(st.session_state.prediction_history)
+    st.dataframe(history_df, use_container_width=True, hide_index=True)
+
+    history_csv = history_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        label="📥 Download Full Prediction History",
+        data=history_csv,
+        file_name="heart_disease_prediction_history.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    if st.button("🗑️ Clear Prediction History", use_container_width=True):
+        st.session_state.prediction_history = []
+        st.success("Prediction history cleared successfully.")
+        st.rerun()
+else:
+    st.info("No predictions made yet. Prediction history will appear here after you make a prediction.")
+
+
+st.divider()
+
+
+# =========================
 # Footer
-st.markdown("""
-<div class="footer">
-    <p>❤️ <b>Heart Disease Prediction System</b> | Educational Project Only</p>
-    <p>Built with Python • Scikit-learn • Streamlit | Not a substitute for professional medical diagnosis</p>
-    <p>© 2024 - All Rights Reserved | For educational purposes only</p>
-</div>
-""", unsafe_allow_html=True)
+# =========================
+st.caption("""
+Developed as a machine learning project using Python, Scikit-learn, Streamlit, and ReportLab.
+This application is for educational purposes only and should not be used as a real medical diagnosis system.
+""")
