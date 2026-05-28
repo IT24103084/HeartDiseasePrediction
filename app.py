@@ -29,10 +29,19 @@ st.set_page_config(
 
 
 # =========================
-# Session state for prediction history
+# Session state
 # =========================
 if "prediction_history" not in st.session_state:
     st.session_state.prediction_history = []
+
+if "latest_pdf_report" not in st.session_state:
+    st.session_state.latest_pdf_report = None
+
+if "latest_csv_report" not in st.session_state:
+    st.session_state.latest_csv_report = None
+
+if "latest_report_available" not in st.session_state:
+    st.session_state.latest_report_available = False
 
 
 # =========================
@@ -107,9 +116,7 @@ def generate_pdf_report(report_data, health_tips):
 
     row = report_data.iloc[0]
 
-    # =========================
     # Title
-    # =========================
     title = Paragraph("Heart Disease Prediction Report", styles["Title"])
     subtitle = Paragraph("Machine Learning Based Prediction Summary", styles["Normal"])
 
@@ -118,9 +125,7 @@ def generate_pdf_report(report_data, health_tips):
     elements.append(subtitle)
     elements.append(Spacer(1, 20))
 
-    # =========================
     # Patient input details
-    # =========================
     elements.append(Paragraph("Patient Input Details", styles["Heading2"]))
 
     patient_data = [
@@ -148,9 +153,7 @@ def generate_pdf_report(report_data, health_tips):
     elements.append(patient_table)
     elements.append(Spacer(1, 20))
 
-    # =========================
     # Prediction result
-    # =========================
     elements.append(Paragraph("Prediction Result", styles["Heading2"]))
 
     prediction_data = [
@@ -174,18 +177,14 @@ def generate_pdf_report(report_data, health_tips):
     elements.append(prediction_table)
     elements.append(Spacer(1, 20))
 
-    # =========================
     # Health guidance
-    # =========================
     elements.append(Paragraph("Health Guidance", styles["Heading2"]))
 
     cleaned_tips = clean_text_for_pdf(health_tips)
     elements.append(Paragraph(cleaned_tips, styles["Normal"]))
     elements.append(Spacer(1, 20))
 
-    # =========================
     # Disclaimer
-    # =========================
     disclaimer = """
     <b>Disclaimer:</b> This report is generated for educational purposes only.
     It should not be used as a real medical diagnosis.
@@ -438,9 +437,7 @@ if st.button("Predict Heart Disease Possibility", use_container_width=True):
     risk_level = get_risk_level(higher_probability)
     health_tips = get_health_tips(risk_level)
 
-    # =========================
     # Prediction result
-    # =========================
     st.subheader("📊 Prediction Result")
 
     result_col1, result_col2 = st.columns(2)
@@ -475,18 +472,14 @@ if st.button("Predict Heart Disease Possibility", use_container_width=True):
 
     st.divider()
 
-    # =========================
     # Health tips
-    # =========================
     st.subheader("💡 Health Tips Based on Result")
     st.info(health_tips)
     st.warning("This advice is for educational purposes only. Please consult a doctor for real medical advice.")
 
     st.divider()
 
-    # =========================
-    # Report data
-    # =========================
+    # Report data with Date & Time kept
     report_data = pd.DataFrame({
         "Date & Time": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
         "Age": [age],
@@ -502,45 +495,52 @@ if st.button("Predict Heart Disease Possibility", use_container_width=True):
         "Risk Level": [risk_level]
     })
 
-    # =========================
     # Input Summary
-    # =========================
     st.write("### 📋 Input Summary")
     st.dataframe(report_data, use_container_width=True, hide_index=True)
 
-    # =========================
-    # Download report as PDF
-    # =========================
+    # Generate reports
     pdf_report = generate_pdf_report(report_data, health_tips)
+    csv_report = report_data.to_csv(index=False).encode("utf-8")
 
+    # Save reports in session state so download buttons do not disappear
+    st.session_state.latest_pdf_report = pdf_report
+    st.session_state.latest_csv_report = csv_report
+    st.session_state.latest_report_available = True
+
+    st.success("✅ Report generated successfully. You can download it from the section below.")
+
+    # Save to prediction history
+    st.session_state.prediction_history.append(report_data.iloc[0].to_dict())
+
+else:
+    st.write("Click the prediction button after entering patient details.")
+
+
+# =========================
+# Persistent Report Download Section
+# =========================
+st.divider()
+st.subheader("📄 Download Latest Prediction Report")
+
+if st.session_state.latest_report_available:
     st.download_button(
         label="📄 Download Prediction Report as PDF",
-        data=pdf_report,
+        data=st.session_state.latest_pdf_report,
         file_name="heart_disease_prediction_report.pdf",
         mime="application/pdf",
         use_container_width=True
     )
 
-    # =========================
-    # Download report data as CSV
-    # =========================
-    csv_report = report_data.to_csv(index=False).encode("utf-8")
-
     st.download_button(
         label="📥 Download Report Data as CSV",
-        data=csv_report,
+        data=st.session_state.latest_csv_report,
         file_name="heart_disease_prediction_data.csv",
         mime="text/csv",
         use_container_width=True
     )
-
-    # =========================
-    # Save to prediction history
-    # =========================
-    st.session_state.prediction_history.append(report_data.iloc[0].to_dict())
-
 else:
-    st.write("Click the prediction button after entering patient details.")
+    st.info("No report generated yet. Make a prediction first to download the report.")
 
 
 # =========================
