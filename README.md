@@ -4,7 +4,6 @@ You can try the deployed app here:
 
 [Heart Disease Prediction System] (https://heartdiseasepredictiongit-hfxo8fsd9tungesxsfwjhw.streamlit.app/)
 
-
 # Heart Disease Prediction System
 
 This is a beginner-friendly machine learning project that predicts the possibility of heart disease based on patient health data.
